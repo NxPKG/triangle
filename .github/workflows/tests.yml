@@ -1,0 +1,50 @@
+name: Run static checks and unit tests
+
+# Any change in triggers needs to be reflected in the concurrency group.
+on:
+  push:
+    branches:
+      - main
+      - v*
+  pull_request:
+    branches:
+    - main
+    - v*
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.event.after }}
+  cancel-in-progress: true
+
+jobs:
+  unit-test:
+    runs-on: ubuntu-22.04
+    steps:
+    - uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
+    - uses: actions/setup-go@93397bea11091df50f3d7e59dc26a7711a8bcfbe # v4.1.0
+      with:
+        # renovate: datasource=golang-version depName=go
+        go-version: '1.21.3'
+    - name: Run static checks
+      uses: golangci/golangci-lint-action@3a919529898de77ec3da873e3063ca4b10e7f5cc # v3.7.0
+      with:
+        # renovate: datasource=docker depName=golangci/golangci-lint
+        version: v1.55.1
+        args: --config=.golangci.yml --verbose
+        skip-cache: true
+    - name: Run slowg analyzer
+      run: | # TODO: remove once slowg is integrated in golangci-lint
+        go install github.com/shipyard/linters@latest
+        linters -slowg ./...
+    - name: Check module vendoring
+      run: |
+        go mod tidy
+        go mod vendor
+        go mod verify
+        git status
+        test -z "$(git status --porcelain)" || (echo "please run 'go mod tidy && go mod vendor', and submit your changes"; exit 1)
+    - name: Run unit tests
+      run: make test
+    - name: Build
+      run: make
+    - name: Build release binaries
+      run: make release
